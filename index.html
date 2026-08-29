@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project Tree Visualizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="icon" type="image/svg+xml" href="folder-tree.svg">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -353,6 +354,34 @@
   .row.folder .name{ color: var(--amber); font-weight:500; }
   .row .count{ color: var(--text-faint); font-size:11px; margin-left:4px; }
 
+  .hide-toggle{
+    background:none;
+    border:none;
+    color: var(--text-faint);
+    cursor:pointer;
+    padding:2px;
+    margin-left:2px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:3px;
+    opacity:0;
+    flex-shrink:0;
+    transition: opacity .12s ease, color .12s ease, background .12s ease;
+  }
+  .row:hover .hide-toggle{ opacity:0.6; }
+  .hide-toggle:hover{ opacity:1 !important; color: var(--amber); background: rgba(232,176,75,0.1); }
+  .hide-toggle.active{ opacity:1; color: var(--amber); }
+  .hide-toggle svg{ width:13px; height:13px; }
+
+  .hide-label{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-style: italic;
+    color: var(--text-faint);
+    margin-left:2px;
+  }
+
   li.collapsed > ul.tree-children{ display:none; }
 
   /* file kind colors */
@@ -431,6 +460,13 @@
         <button class="btn ghost small" id="expandAllBtn">Expand all</button>
         <button class="btn ghost small" id="collapseAllBtn">Collapse all</button>
       </div>
+      <div class="toggle-row">
+        <span>Hide files in all folders</span>
+        <label class="switch">
+          <input type="checkbox" id="hideAllFilesToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
     </div>
 
     <div class="side-section">
@@ -481,8 +517,14 @@
     useDefaults: true,
     ignoredCount: 0,
     fileCount: 0,
-    folderCount: 0
+    folderCount: 0,
+    hiddenFileFolders: new Set(),  // paths (e.g. "assets" or "src/theme") where files are hidden
+    hideAllFiles: false            // global override — hides files in every folder
   };
+
+  function joinPath(base, name){
+    return base ? base + '/' + name : name;
+  }
 
   try {
     const saved = JSON.parse(localStorage.getItem('ptv_ignores') || 'null');
@@ -498,6 +540,7 @@
   const ignoreInput = el('ignoreInput');
   const defaultsToggle = el('defaultsToggle');
   const searchInput = el('searchInput');
+  const hideAllFilesToggle = el('hideAllFilesToggle');
   const mainArea = el('mainArea');
   const toast = el('toast');
 
@@ -646,7 +689,10 @@
     return '<svg viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.8"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6Z"/></svg>';
   }
 
-  function renderNode(node, depth, isLast){
+  const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.9 21.9 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.9 21.9 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+  function renderNode(node, depth, isLast, path){
     const li = document.createElement('li');
     li.className = 'tree-node' + (isLast ? ' is-last' : '');
 
@@ -674,25 +720,54 @@
     name.textContent = node.name;
     row.appendChild(name);
 
-    if (node.type === 'folder' && node.children.size){
-      const count = document.createElement('span');
-      count.className = 'count';
-      count.textContent = node.children.size;
-      row.appendChild(count);
+    let visibleEntries = [];
+    let hideFiles = false;
+
+    if (node.type === 'folder'){
+      hideFiles = state.hideAllFiles || state.hiddenFileFolders.has(path);
+      const allEntries = [...node.children.entries()];
+      visibleEntries = hideFiles ? allEntries.filter(([, c]) => c.type === 'folder') : allEntries;
+
+      // only offer the per-folder toggle when the global switch isn't already forcing this,
+      // and when this folder actually contains files to hide/show
+      const hasAnyFiles = allEntries.some(([, c]) => c.type === 'file');
+      if (hasAnyFiles && !state.hideAllFiles){
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'hide-toggle' + (hideFiles ? ' active' : '');
+        toggleBtn.title = hideFiles ? 'Show files in this folder' : 'Hide files in this folder';
+        toggleBtn.innerHTML = hideFiles ? EYE_OFF_SVG : EYE_SVG;
+        toggleBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          if (state.hiddenFileFolders.has(path)) state.hiddenFileFolders.delete(path);
+          else state.hiddenFileFolders.add(path);
+          buildAndRender();
+        });
+        row.appendChild(toggleBtn);
+      }
+
+      if (visibleEntries.length){
+        const count = document.createElement('span');
+        count.className = 'count';
+        count.textContent = visibleEntries.length;
+        row.appendChild(count);
+      }
     }
 
     li.appendChild(row);
 
     if (node.type === 'folder'){
-      row.addEventListener('click', () => li.classList.toggle('collapsed'));
+      row.addEventListener('click', e => {
+        if (e.target.closest('.hide-toggle')) return;
+        li.classList.toggle('collapsed');
+      });
 
-      if (node.children.size){
+      if (visibleEntries.length){
         const ul = document.createElement('ul');
         ul.className = 'tree-children';
         ul.style.setProperty('--line-color', DEPTH_COLORS[depth % DEPTH_COLORS.length]);
-        const entries = [...node.children.values()];
-        entries.forEach((child, i) => {
-          ul.appendChild(renderNode(child, depth + 1, i === entries.length - 1));
+        visibleEntries.forEach(([childName, child], i) => {
+          ul.appendChild(renderNode(child, depth + 1, i === visibleEntries.length - 1, joinPath(path, childName)));
         });
         li.appendChild(ul);
       }
@@ -716,9 +791,9 @@
 
     const rootUl = document.createElement('ul');
     rootUl.className = 'tree-root';
-    const entries = [...cloned.children.values()];
-    entries.forEach((child, i) => {
-      rootUl.appendChild(renderNode(child, 0, i === entries.length - 1));
+    const entries = [...cloned.children.entries()];
+    entries.forEach(([childName, child], i) => {
+      rootUl.appendChild(renderNode(child, 0, i === entries.length - 1, joinPath('', childName)));
     });
     mainArea.appendChild(rootUl);
 
@@ -846,25 +921,43 @@
     });
   });
 
+  hideAllFilesToggle.addEventListener('change', () => {
+    state.hideAllFiles = hideAllFilesToggle.checked;
+    if (state.tree) buildAndRender();
+  });
+
   /* ---------- export ---------- */
 
-  function treeToText(node, prefix, isRoot){
+  function domToText(){
+    const rootUl = mainArea.querySelector('ul.tree-root');
+    const rootLabel = mainArea.querySelector('.tree-title .amber');
+    let out = rootLabel ? rootLabel.textContent + '/\n' : '';
+    if (rootUl) out += walkUlToText(rootUl, '');
+    return out;
+  }
+
+  function walkUlToText(ul, prefix){
     let out = '';
-    if (isRoot) out += node.name + '/\n';
-    const entries = [...node.children.values()];
-    entries.forEach((child, i) => {
-      const isLast = i === entries.length - 1;
+    const items = [...ul.children].filter(li => li.style.display !== 'none');
+    items.forEach((li, i) => {
+      const isLast = i === items.length - 1;
+      const row = li.querySelector(':scope > .row');
+      const nameEl = row.querySelector(':scope > .name');
+      const isFolder = row.classList.contains('folder');
       const branch = isLast ? '└── ' : '├── ';
       const nextPrefix = prefix + (isLast ? '    ' : '│   ');
-      out += prefix + branch + child.name + (child.type === 'folder' ? '/' : '') + '\n';
-      if (child.type === 'folder') out += treeToText(child, nextPrefix, false);
+      out += prefix + branch + nameEl.textContent + (isFolder ? '/' : '') + '\n';
+      const childUl = li.querySelector(':scope > ul.tree-children');
+      if (isFolder && childUl && !li.classList.contains('collapsed')){
+        out += walkUlToText(childUl, nextPrefix);
+      }
     });
     return out;
   }
 
   function currentText(){
     if (!state.tree) return '';
-    return treeToText(state.tree, '', true);
+    return domToText();
   }
 
   el('copyBtn').addEventListener('click', async () => {
