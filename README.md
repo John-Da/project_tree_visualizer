@@ -15,11 +15,25 @@ No server, no accounts, no data leaving your machine — just a quick way to see
 ```bash
 aks/
 ├── cancel-modal/
+├── confirm-modal/
+├── faq-page/
+├── FolioLeaflet/
+│   ├── .angular/
+│   ├── public/
+│   │   ├── api/
+│   │   └── assets/
+│   └── src/
 ├── privacy-page/
 ├── terms-page/
 ├── timeout-modal/
 ├── cancel-modal.zip
+├── confirm-modal.zip
+├── faq-page.zip
+├── FolioLeaflet.zip
+├── privacy-page.zip
+├── terms-page.zip
 └── timeout-modal.zip
+
 ```
 
 ### Demo — UI
